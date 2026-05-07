@@ -59,6 +59,29 @@ A pilot run uses roughly 30 messages of subscription quota per task (3 arms ×
 out around 200 messages per 5-hour window — so 6–7 task pilots fit per window
 before reset.
 
+### Offline mode (recommended)
+
+Live ShipFlow invocation is slow and chews through quota. Better workflow:
+
+1. Run ShipFlow once per (task, branch) by hand and copy the `docs/shipflow/`
+   output into `examples/<task_id>/{main,mono}/`. See [`examples/README.md`](./examples/README.md).
+2. Pass `--examples-dir examples/` — arms `main`/`mono` will score those
+   pre-generated files instead of running ShipFlow live.
+3. Tweak rubrics, re-score in seconds. Check into git for reproducibility.
+
+```bash
+qualitybench run \
+  --tasks tasks/ \
+  --arms vanilla,vanilla-with-canon,main,mono \
+  --examples-dir examples/ \
+  --runs 3
+```
+
+The harness automatically falls back to live mode for any (task, arm) that's
+missing under `examples/`. A single Haiku check at scoring time verifies that
+your hand-typed answers in `answers.md` are consistent with the canon —
+warnings printed inline.
+
 ## Layout
 
 ```

@@ -12,6 +12,7 @@ import click
 from rich.console import Console
 
 from .arms.base import ArmAdapter
+from .arms.example import ExampleArm
 from .arms.shipflow import ShipFlowArm
 from .arms.vanilla import VanillaArm
 from .arms.vanilla_with_canon import VanillaWithCanonArm
@@ -24,27 +25,49 @@ console = Console()
 
 def _build_arms(
     names: list[str],
+    *,
+    task_id: str,
     shipflow_main_path: Path | None,
     shipflow_mono_path: Path | None,
+    examples_dir: Path | None,
+    verify_examples: bool,
 ) -> list[ArmAdapter]:
+    """Build adapters for `names`, picking ExampleArm or ShipFlowArm per task.
+
+    When --examples-dir is provided AND examples/<task_id>/<name>/ exists, the
+    arm runs offline against pre-generated files. Otherwise it falls back to
+    live ShipFlow invocation via claude-agent-sdk.
+    """
     arms: list[ArmAdapter] = []
     for name in names:
         if name == "vanilla":
             arms.append(VanillaArm())
         elif name == "vanilla-with-canon":
             arms.append(VanillaWithCanonArm())
-        elif name == "main":
-            if not shipflow_main_path:
-                raise click.UsageError(
-                    "--shipflow-main-path is required for arm 'main'"
+        elif name in ("main", "mono"):
+            example_path = (
+                examples_dir / task_id / name if examples_dir else None
+            )
+            if example_path and example_path.is_dir():
+                arms.append(
+                    ExampleArm(
+                        name=name,
+                        example_dir=example_path,
+                        verify_canon=verify_examples,
+                    )
                 )
-            arms.append(ShipFlowArm(name="main", plugin_path=shipflow_main_path))
-        elif name == "mono":
-            if not shipflow_mono_path:
+                continue
+            # Fall back to live invocation.
+            plugin_path = (
+                shipflow_main_path if name == "main" else shipflow_mono_path
+            )
+            if not plugin_path:
                 raise click.UsageError(
-                    "--shipflow-mono-path is required for arm 'mono'"
+                    f"arm '{name}' needs either an entry under "
+                    f"--examples-dir/{task_id}/{name}/ or "
+                    f"--shipflow-{name}-path for live mode"
                 )
-            arms.append(ShipFlowArm(name="mono", plugin_path=shipflow_mono_path))
+            arms.append(ShipFlowArm(name=name, plugin_path=plugin_path))
         else:
             raise click.UsageError(f"unknown arm: {name}")
     return arms
@@ -102,6 +125,25 @@ def main() -> None:
     envvar="SHIPFLOW_MONO_PATH",
     help="Path to ShipFlow experiment/mono-agent checkout.",
 )
+@click.option(
+    "--examples-dir",
+    "examples_dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    envvar="QB_EXAMPLES_DIR",
+    help=(
+        "Directory of pre-generated ShipFlow output. When set, arms 'main' "
+        "and 'mono' read from <dir>/<task_id>/<arm>/ instead of running "
+        "ShipFlow live. Falls back to live mode if a (task, arm) entry is "
+        "missing."
+    ),
+)
+@click.option(
+    "--verify-examples/--no-verify-examples",
+    "verify_examples",
+    default=True,
+    show_default=True,
+    help="Single-shot Haiku check that user-typed answers match task canon.",
+)
 def run(
     task_path: Path | None,
     tasks_dir: Path | None,
@@ -112,6 +154,8 @@ def run(
     max_turns: int,
     shipflow_main_path: Path | None,
     shipflow_mono_path: Path | None,
+    examples_dir: Path | None,
+    verify_examples: bool,
 ) -> None:
     """Run the benchmark."""
     if not task_path and not tasks_dir:
@@ -129,21 +173,28 @@ def run(
         f"runs={runs} pilot={pilot}"
     )
 
-    adapters = _build_arms(
-        arm_names,
-        shipflow_main_path=shipflow_main_path,
-        shipflow_mono_path=shipflow_mono_path,
-    )
-    if not adapters:
-        console.print("[red]no runnable arms; exiting[/red]")
-        return
-
     out_dir.mkdir(parents=True, exist_ok=True)
     for task in tasks:
+        adapters = _build_arms(
+            arm_names,
+            task_id=task.id,
+            shipflow_main_path=shipflow_main_path,
+            shipflow_mono_path=shipflow_mono_path,
+            examples_dir=examples_dir,
+            verify_examples=verify_examples,
+        )
+        if not adapters:
+            console.print("[red]no runnable arms; skipping task[/red]")
+            continue
+
         for run_idx in range(1, runs + 1):
+            modes = [
+                f"{a.name}({type(a).__name__.replace('Arm','').lower()})"
+                for a in adapters
+            ]
             console.print(
                 f"[cyan]→[/cyan] task={task.id} run={run_idx}/{runs} "
-                f"arms={[a.name for a in adapters]}"
+                f"arms={modes}"
             )
             arm_runs = run_task(
                 task=task,
@@ -164,6 +215,24 @@ def run(
                     f"{len(r.arm_result.qa_turns)} Q&A, "
                     f"{len(r.arm_result.design)} design chars | {scores}"
                 )
+                drift = next(
+                    (
+                        e
+                        for e in r.arm_result.raw_events
+                        if isinstance(e, dict) and e.get("type") == "canon_drift_warning"
+                    ),
+                    None,
+                )
+                if drift:
+                    issues = drift.get("issues", [])
+                    console.print(
+                        f"     [yellow]⚠ canon drift in answers ({len(issues)} issue(s)):[/yellow]"
+                    )
+                    for it in issues[:3]:
+                        console.print(
+                            f"        - {it.get('canon_field', '?')}: "
+                            f"{it.get('rationale', '')[:160]}"
+                        )
 
 
 @main.command()
