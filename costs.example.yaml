@@ -1,0 +1,13 @@
+# Example cost ledger to feed into `qualitybench report --cost-file`.
+#
+# Structure: { <task_id>: { <run_index_as_string>: { <arm>: <usd_float> } } }
+#
+# Per SPEC §10.1, costs are reported manually from the user's Claude Code
+# session bill rather than auto-captured by the harness. Paste the per-arm
+# total after each run.
+
+01_habit_tracker:
+  "1":
+    vanilla: 0.12
+    main: 0.84
+    mono: 0.42

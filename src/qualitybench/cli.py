@@ -10,6 +10,7 @@ from rich.console import Console
 from .arms.base import ArmAdapter
 from .arms.shipflow import ShipFlowArm
 from .arms.vanilla import VanillaArm
+from .report import build_report
 from .runner import run_task
 from .schema import load_tasks
 
@@ -155,6 +156,47 @@ def run(
                     f"{len(r.arm_result.qa_turns)} Q&A, "
                     f"{len(r.arm_result.design)} design chars | {scores}"
                 )
+
+
+@main.command()
+@click.option(
+    "--results",
+    "results_dir",
+    default="results",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+)
+@click.option(
+    "--out-md",
+    default="results/report.md",
+    show_default=True,
+    type=click.Path(path_type=Path),
+)
+@click.option(
+    "--out-json",
+    default="results/report.json",
+    show_default=True,
+    type=click.Path(path_type=Path),
+)
+@click.option(
+    "--cost-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="YAML file mapping {task_id: {run_index: {arm: usd}}}.",
+)
+def report(results_dir: Path, out_md: Path, out_json: Path, cost_file: Path | None) -> None:
+    """Aggregate results into a markdown + JSON report."""
+    out_md.parent.mkdir(parents=True, exist_ok=True)
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    payload = build_report(results_dir, out_md, out_json, cost_file=cost_file)
+    if not payload:
+        console.print("[yellow]No runs found in results dir.[/yellow]")
+        return
+    console.print(f"[green]Report written:[/green] {out_md} / {out_json}")
+    for arm, info in payload.get("arms", {}).items():
+        console.print(
+            f"  {arm}: n={info['n_runs']} errors={info['error_count']} "
+            f"cost={info.get('cost_total') or '—'}"
+        )
 
 
 if __name__ == "__main__":
