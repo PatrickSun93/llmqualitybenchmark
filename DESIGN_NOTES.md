@@ -184,7 +184,7 @@
 
 **关键悟**:你以为你想测 substantive,其实你能测的只有 procedural,而且对于架构对照来说 procedural 反而更敏感 — 因为它直接反映系统层面的「能力」,而不是个例的运气。
 
-**对应 5 个程序性维度**(见 SPEC §5.1):Canon 一致性、内部一致性、决策密度、Trace-ability、Critical decision coverage。
+**对应 6 个程序性维度**(见 SPEC §5.1):Canon 一致性、内部一致性、决策密度、Trace-ability、Critical decision coverage、Scope Discipline。
 
 **主观维度**(架构优雅性等):用 multi-persona ensemble,一致就计分,分歧就标注但不计主分。
 
@@ -215,7 +215,27 @@
 
 **这是反直觉但关键的原则**:不要为了「让对照看起来公平」就工程化你的 baseline。Baseline 的意义就在于「真实用户没装 plugin 时会得到什么」。
 
-### 2.9 成本数据:用真实账单,不要估
+### 2.9 指令遵循:差点漏掉的维度
+
+**问题**:用户最初列出的四大维度里有「Instruction-following」。在向 procedural quality 转向时,我下意识把它「分散」进了 Canon 一致性、Trace-ability、Critical decision coverage 三个维度,觉得已经覆盖了。
+
+**用户审 spec 时抓到了**:仔细一看,有一类失败模式仍然漏网 ——
+
+> idea 说「习惯追踪 app」,canon 没说要 onboarding。design 提案变成「habit tracker + AI coach + 社区 + onboarding 流程 + 付费墙 ...」。
+
+这些「多出来」的功能 *可以* trace 到「一般产品最佳实践」,所以 Trace-ability 不会扣分。但 **idea / canon / Q&A 都没要求它们**。这正是 over-engineering 的典型形态。
+
+**为什么这是 Main 特有的失败模式风险**:22 个 specialized agent 各自「在自己领域尽职」,合起来必然倾向于「把所有最佳实践都加上」。这是 specialization 的代价之一。**如果不专门测,benchmark 等于装作看不见这个真实弱点**,有 pro-Main 偏向。
+
+**选择**:加 Scope Discipline 作为第 6 个程序性维度(总维度从 8 → 9)。
+
+**测量**:复用 decision extractor 抽决策,然后对每个决策做四源分类(idea / canon / must_be_addressed / Q&A 主动确认)。都不是 → unrequested。Unrequested 占比 = 反向 Scope Discipline 分。
+
+**学到的元教训**:
+- 转换框架(从「绝对评分」到「procedural」)时,**容易丢掉一些原本想测的东西**,而且因为新框架自洽,丢失感不强烈。需要回头核对原始需求清单。
+- 维度之间的「互补性」很重要 — Trace-ability 看「该有的有依据」,Scope Discipline 看「不该有的没混进来」,两者必须配对,只有一个不完整。
+
+### 2.10 成本数据:用真实账单,不要估
 
 **问题**:每个 task 多少 token / 多少钱?
 

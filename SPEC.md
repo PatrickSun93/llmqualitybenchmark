@@ -1,4 +1,4 @@
-# LLM Quality Benchmark — Spec v0.1
+# LLM Quality Benchmark — Spec v0.2
 
 > 一个用于评估 Claude Code phase-gated 多 agent 工作流 plugin 质量的 benchmark harness。
 > 测的是 **plugin 相对 baseline 的增量(lift)**,以 **程序性质量(well-formedness)** 为主要测度,而非「设计好坏」这种主观判断。
@@ -45,11 +45,11 @@
 
 ---
 
-## 5. 评估维度(8 个)
+## 5. 评估维度(9 个)
 
-### 5.1 程序性指标(5)— 主轴
+### 5.1 程序性指标 — 主轴
 
-这五条不依赖偏好判断,即使没有 ground truth 也成立。
+这六条不依赖偏好判断,即使没有 ground truth 也成立。
 
 | # | 维度 | 测量方式 |
 |---|---|---|
@@ -58,6 +58,7 @@
 | 3 | **决策密度** | Committed decision 在 design 中的占比。「我们用 X」是决策;「需要进一步调研」是 punt;「考虑 X 或 Y」是模糊。Extractor 自动统计。 |
 | 4 | **Trace-ability** | 每个决策能否回溯到 idea 或 canon 里的某个具体原因?Judge 对每个决策标 `grounded` / `空降`。 |
 | 5 | **Critical decision coverage** | Task 中预先标注的关键决策点(认证方案、数据存储、计费模型等),design 命中了几项?**Deterministic**。 |
+| 6 | **Scope Discipline(指令遵循)** | Design 中每个主要决策是否能 trace 到 (a) idea / (b) canon / (c) `must_be_addressed` / (d) Q&A 中 simulator 主动确认?都不是 → unrequested。Unrequested 决策占比越低分越高。**抓 over-engineering / 范围漂移**,与 Trace-ability 互补(Trace-ability 看「该有的有没有依据」,Scope Discipline 看「不该有的有没有混进来」)。 |
 
 ### 5.2 提问质量(1)
 
@@ -213,7 +214,7 @@ arm 进入 design 阶段,产出 final design
 
 ### 9.2 范围
 
-不是 8 个维度都跑 3 次。**只在 Canon 一致性、决策密度** 这两个最关键的轴上跑 robustness check,降本同时保留信号。
+不是 9 个维度都跑 3 次。**只在 Canon 一致性、决策密度、Scope Discipline** 这三个最关键的轴上跑 robustness check,降本同时保留信号。
 
 ---
 
@@ -288,7 +289,7 @@ Notes (optional): Main 4 min, Mono 2 min
 - judge 是否被 format 偏见污染(spot check 几次输出和 judge rationale)
 - 三个 arm 的 cost 量级是否符合预期
 
-Pilot 通过后,扩到 5 task / 3 run / 8 维度。再通过后,扩到 15-20 task。
+Pilot 通过后,扩到 5 task / 3 run / 9 维度。再通过后,扩到 15-20 task。
 
 ---
 
@@ -315,6 +316,7 @@ Pilot 通过后,扩到 5 task / 3 run / 8 维度。再通过后,扩到 15-20 tas
 - [ ] Canon 一致性 deterministic check
 - [ ] Critical decision coverage deterministic check
 - [ ] Decision density extractor(Haiku)
+- [ ] Scope Discipline check(复用 decision extractor + 四源分类)
 - [ ] Question Quality 评分(Coverage deterministic + Precision via judge)
 - [ ] Pairwise tournament judge
 - [ ] Layer 1 + Layer 2 报告
@@ -323,7 +325,7 @@ Pilot 通过后,扩到 5 task / 3 run / 8 维度。再通过后,扩到 15-20 tas
 
 - [ ] 5 个 task
 - [ ] 3 个 run × robustness check
-- [ ] 全 8 维度
+- [ ] 全 9 维度
 - [ ] Multi-persona ensemble
 - [ ] Layer 3 representative examples
 - [ ] Pareto 图
@@ -362,6 +364,7 @@ Pilot 通过后,扩到 5 task / 3 run / 8 维度。再通过后,扩到 15-20 tas
 | Judge 偏见怎么压 | 显式反偏见条款 + multi-persona ensemble | 单一 judge 偏见不可避免,多视角能稀释 |
 | Vanilla 要不要工程 | **不工程** | 加了引导就不是 baseline 了 |
 | 成本怎么算 | 用户手动粘 per-arm total | 真实账单,免去 SDK usage 累加复杂度 |
+| 指令遵循怎么测 | 单列 Scope Discipline 维度 | Trace-ability 只抓「该有的有依据」,不抓「不该有的混进来」(over-engineering),需要互补维度 |
 
 ## 附录 B:Judge 反偏见条款(完整版,写入所有 judge prompt)
 
