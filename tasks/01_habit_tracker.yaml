@@ -1,0 +1,38 @@
+id: 01_habit_tracker
+
+idea: |
+  我想做一个习惯追踪 app。
+
+# Hidden from arms; only the User Simulator sees this.
+canon:
+  target_user: 25-35 岁互联网从业者,不爱社交
+  platform: 优先 web,移动端可以晚点做
+  business_model: 个人付费订阅,不打算 B2B
+  key_dislike: 讨厌游戏化(积分、徽章、连续天数排行榜),用户讨厌焦虑感
+  constraint_tech: 我会 React,后端最好别太复杂
+  constraint_budget: 个人项目,前 6 个月每月运行成本 < $50
+  out_of_scope: |
+    不打算做社交功能,但 arm 主动问起来时回答"也许以后",
+    不要主动透露这个偏好
+
+# Used to score Critical decision coverage.
+must_be_addressed:
+  - 用户认证方案
+  - 数据存储选型
+  - 订阅 / 计费机制
+  - 部署平台
+  - 习惯打卡的交互形式
+
+# Used to score Question Quality coverage.
+key_ambiguities:
+  - 个人 vs 团队
+  - web / mobile / both
+  - 免费 / 订阅 / 一次买断
+  - 游戏化 vs 极简      # canon 里明确反对游戏化,trap question
+  - 技术栈约束
+
+# Simulator should give a vague non-answer if asked about these.
+canon_silent_on:
+  - 是否需要 onboarding 流程
+  - 是否需要数据导出
+  - 是否需要 dark mode
