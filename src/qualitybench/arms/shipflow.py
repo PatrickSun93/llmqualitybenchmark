@@ -103,7 +103,7 @@ class ShipFlowArm:
                     # Turn 2: route each question through the simulator and reply.
                     answer_lines: list[str] = []
                     for idx, q in enumerate(questions, start=1):
-                        a = simulator.answer(q)
+                        a = await asyncio.to_thread(simulator.answer, q)
                         answer_lines.append(f"Q{idx}: {q}\nA{idx}: {a}\n")
                     answer_blob = "\n".join(answer_lines)
 

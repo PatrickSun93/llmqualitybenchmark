@@ -1,12 +1,15 @@
-"""End-to-end runner: orchestrates simulator + arms + checks, persists per-run artifacts."""
+"""End-to-end runner: orchestrates simulator + arms + checks, persists artifacts.
+
+All LLM calls (simulator, checks, judges, arms) route through `claude -p` or
+claude-agent-sdk; nothing here uses the Anthropic API directly. The user's
+Claude Code subscription auth handles billing.
+"""
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-
-from anthropic import Anthropic
 
 from .arms.base import ArmAdapter, ArmResult
 from .checks import CheckResult, run_all_checks, run_pilot_checks
@@ -34,23 +37,22 @@ class ArmRun:
         }
 
 
-def run_arm(task: Task, arm: ArmAdapter, client: Anthropic, max_turns: int = 5) -> ArmResult:
+PAIRWISE_DIMENSIONS = list(DIMENSION_DEFINITIONS.keys())
+
+
+def run_arm(task: Task, arm: ArmAdapter, max_turns: int = 5) -> ArmResult:
     """Run one arm on one task with its own fresh simulator state.
 
     A fresh simulator per arm is required for fairness — sharing transcript
     across arms would let later arms benefit from earlier arms' Q&A.
     """
-    simulator = UserSimulator(task=task, client=client, max_turns=max_turns)
+    simulator = UserSimulator(task=task, max_turns=max_turns)
     return arm.run(task=task, simulator=simulator)
-
-
-PAIRWISE_DIMENSIONS = list(DIMENSION_DEFINITIONS.keys())
 
 
 def run_task(
     task: Task,
     arms: list[ArmAdapter],
-    client: Anthropic,
     out_dir: Path,
     run_index: int = 1,
     max_turns: int = 5,
@@ -64,21 +66,19 @@ def run_task(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     for arm in arms:
-        arm_result = run_arm(task=task, arm=arm, client=client, max_turns=max_turns)
+        arm_result = run_arm(task=task, arm=arm, max_turns=max_turns)
         checks: list[CheckResult] = []
         if not skip_checks and not arm_result.error and arm_result.design.strip():
             check_fn = run_pilot_checks if pilot else run_all_checks
-            checks = list(check_fn(task, arm_result, client))
+            checks = list(check_fn(task, arm_result))
             if not pilot:
-                # Judge-based per-arm checks
-                checks.append(internal_consistency(task, arm_result, client))
-                checks.append(question_quality(task, arm_result, client, max_turns=max_turns))
+                checks.append(internal_consistency(task, arm_result))
+                checks.append(question_quality(task, arm_result, max_turns=max_turns))
         run = ArmRun(arm_result=arm_result, checks=checks)
         runs.append(run)
         path = run_dir / f"{arm.name}.json"
         path.write_text(json.dumps(run.to_dict(), indent=2, ensure_ascii=False))
 
-    # Pairwise tournament across arms (skip in pilot mode and when fewer than 2 arms succeeded).
     pairwise: dict[str, dict[str, int]] = {}
     successful = {
         r.arm_result.arm_name: r.arm_result
@@ -88,7 +88,7 @@ def run_task(
     if not pilot and len(successful) >= 2:
         for dim in PAIRWISE_DIMENSIONS:
             pairwise[dim] = pairwise_tournament(
-                dimension=dim, task=task, arm_results=successful, client=client
+                dimension=dim, task=task, arm_results=successful
             )
 
     summary = {

@@ -9,17 +9,18 @@ These are the dimensions that don't reduce cleanly to extractor patterns:
 
 The anti-bias clause from SPEC Appendix B is prepended to every judge prompt
 to suppress format / length / formality bias.
+
+All judge calls route through `claude -p` (subscription).
 """
 from __future__ import annotations
 
 import json
 import re
 
-from anthropic import Anthropic
-
 from .arms.base import ArmResult
 from .checks.base import CheckResult, ItemVerdict
 from .checks.coverage import question_coverage
+from .llm import query_text
 from .schema import Task
 
 JUDGE_MODEL = "claude-opus-4-7"
@@ -83,24 +84,14 @@ Empty array if none. No prose outside the JSON.
 """
 
 
-def internal_consistency(task: Task, result: ArmResult, client: Anthropic) -> CheckResult:
+def internal_consistency(task: Task, result: ArmResult) -> CheckResult:
     if not result.design.strip():
         return CheckResult(name="internal_consistency", score=0.0, notes="empty design")
 
-    response = client.messages.create(
+    text = query_text(
+        INTERNAL_CONSISTENCY_PROMPT.format(anti_bias=ANTI_BIAS, design=result.design),
         model=JUDGE_MODEL,
-        max_tokens=2048,
-        temperature=0,
-        messages=[
-            {
-                "role": "user",
-                "content": INTERNAL_CONSISTENCY_PROMPT.format(
-                    anti_bias=ANTI_BIAS, design=result.design
-                ),
-            }
-        ],
     )
-    text = "".join(b.text for b in response.content if b.type == "text")
     try:
         data = json.loads(_strip_json(text))
         contradictions = data.get("contradictions") or []
@@ -116,8 +107,6 @@ def internal_consistency(task: Task, result: ArmResult, client: Anthropic) -> Ch
         for c in contradictions
         if isinstance(c, dict)
     ]
-    # Score: 1.0 if no contradictions, decays with each one. Cap at 5 contradictions for
-    # the purpose of this score (more than 5 saturates at 0).
     n = min(len(items), 5)
     score = max(0.0, 1.0 - 0.2 * n)
     return CheckResult(
@@ -150,28 +139,22 @@ No prose outside the array.
 """
 
 
-def _question_precision_verdicts(questions: list[str], client: Anthropic) -> list[ItemVerdict]:
+def _question_precision_verdicts(questions: list[str]) -> list[ItemVerdict]:
     if not questions:
         return []
-    response = client.messages.create(
+    text = query_text(
+        QUESTION_PRECISION_PROMPT.format(
+            anti_bias=ANTI_BIAS,
+            questions="\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions)),
+        ),
         model=JUDGE_MODEL,
-        max_tokens=2048,
-        temperature=0,
-        messages=[
-            {
-                "role": "user",
-                "content": QUESTION_PRECISION_PROMPT.format(
-                    anti_bias=ANTI_BIAS,
-                    questions="\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions)),
-                ),
-            }
-        ],
     )
-    text = "".join(b.text for b in response.content if b.type == "text")
     try:
         data = json.loads(_strip_json(text))
     except json.JSONDecodeError:
         return [ItemVerdict(item=q, verdict="unclear", rationale="parse failure") for q in questions]
+    if not isinstance(data, list):
+        return [ItemVerdict(item=q, verdict="unclear", rationale="non-array") for q in questions]
     out: list[ItemVerdict] = []
     by_q = {str(e.get("question", "")): e for e in data if isinstance(e, dict)}
     for q in questions:
@@ -198,28 +181,20 @@ def _restraint_score(result: ArmResult, max_turns: int) -> float:
     return max(0.0, 1.0 - n / max_turns)
 
 
-def _non_redundancy_score(result: ArmResult, client: Anthropic) -> float:
+def _non_redundancy_score(result: ArmResult) -> float:
     if len(result.qa_turns) < 2:
         return 1.0
     questions = "\n".join(f"{i + 1}. {t.question}" for i, t in enumerate(result.qa_turns))
-    response = client.messages.create(
+    text = query_text(
+        (
+            f"{ANTI_BIAS}\n\nCount how many of the following questions are "
+            "redundant — i.e., already answered by an earlier question or the "
+            "user's idea. Output STRICT JSON: "
+            '{"redundant_count": <int>, "total": <int>}.\n\n'
+            f"<questions>\n{questions}\n</questions>"
+        ),
         model=JUDGE_MODEL,
-        max_tokens=512,
-        temperature=0,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"{ANTI_BIAS}\n\nCount how many of the following questions are "
-                    "redundant — i.e., already answered by an earlier question or the "
-                    "user's idea. Output STRICT JSON: "
-                    '{"redundant_count": <int>, "total": <int>}.\n\n'
-                    f"<questions>\n{questions}\n</questions>"
-                ),
-            }
-        ],
     )
-    text = "".join(b.text for b in response.content if b.type == "text")
     try:
         data = json.loads(_strip_json(text))
         red = int(data.get("redundant_count", 0))
@@ -231,14 +206,10 @@ def _non_redundancy_score(result: ArmResult, client: Anthropic) -> float:
         return 1.0
 
 
-def question_quality(
-    task: Task, result: ArmResult, client: Anthropic, max_turns: int = 5
-) -> CheckResult:
+def question_quality(task: Task, result: ArmResult, max_turns: int = 5) -> CheckResult:
     """Composite of coverage + precision + restraint + non-redundancy."""
-    coverage = question_coverage(task, result, client)
+    coverage = question_coverage(task, result)
     if not result.qa_turns:
-        # No questions → coverage handles the 0; precision/non-red are trivially 1
-        # but restraint is also trivially 1. We average them all.
         score = (coverage.score + 1.0 + 1.0 + 1.0) / 4
         return CheckResult(
             name="question_quality",
@@ -247,12 +218,12 @@ def question_quality(
         )
 
     questions = [t.question for t in result.qa_turns]
-    precision_verdicts = _question_precision_verdicts(questions, client)
+    precision_verdicts = _question_precision_verdicts(questions)
     sharp = sum(1 for v in precision_verdicts if v.verdict == "yes")
     precision_score = sharp / len(precision_verdicts) if precision_verdicts else 0.0
 
     restraint = _restraint_score(result, max_turns=max_turns)
-    non_redundancy = _non_redundancy_score(result, client)
+    non_redundancy = _non_redundancy_score(result)
 
     score = (coverage.score + precision_score + restraint + non_redundancy) / 4
     notes = (
@@ -311,7 +282,6 @@ def pairwise_tournament(
     dimension: str,
     task: Task,
     arm_results: dict[str, ArmResult],
-    client: Anthropic,
 ) -> dict[str, int]:
     """Rank arms on `dimension`. Returns {arm_name: rank} where 1 is best."""
     if dimension not in DIMENSION_DEFINITIONS:
@@ -319,7 +289,6 @@ def pairwise_tournament(
     if len(arm_results) < 2:
         return {name: 1 for name in arm_results}
 
-    # Stable label scheme so the judge sees "A / B / C" without knowing arm names.
     labels = ["A", "B", "C", "D", "E"][: len(arm_results)]
     label_to_arm = dict(zip(labels, arm_results.keys(), strict=False))
     block = "\n\n".join(
@@ -327,30 +296,21 @@ def pairwise_tournament(
         for label in labels
     )
 
-    response = client.messages.create(
+    text = query_text(
+        PAIRWISE_PROMPT.format(
+            anti_bias=ANTI_BIAS,
+            dimension=dimension,
+            definition=DIMENSION_DEFINITIONS[dimension],
+            block=block,
+        ),
         model=JUDGE_MODEL,
-        max_tokens=2048,
-        temperature=0,
-        messages=[
-            {
-                "role": "user",
-                "content": PAIRWISE_PROMPT.format(
-                    anti_bias=ANTI_BIAS,
-                    dimension=dimension,
-                    definition=DIMENSION_DEFINITIONS[dimension],
-                    block=block,
-                ),
-            }
-        ],
     )
-    text = "".join(b.text for b in response.content if b.type == "text")
     try:
         data = json.loads(_strip_json(text))
         ranking = data.get("ranking") or []
     except json.JSONDecodeError:
         ranking = []
 
-    # Map labels back to arm names; rank by position. Unranked arms get last place.
     ranks: dict[str, int] = {}
     for pos, label in enumerate(ranking, start=1):
         arm = label_to_arm.get(str(label).strip())

@@ -7,8 +7,6 @@ Each non-empty canon field becomes a yes/no/unclear question for the classifier:
 """
 from __future__ import annotations
 
-from anthropic import Anthropic
-
 from ..arms.base import ArmResult
 from ..schema import Task
 from .base import CheckResult
@@ -41,7 +39,7 @@ def _build_items(task: Task) -> list[tuple[str, str]]:
     return items
 
 
-def canon_consistency(task: Task, result: ArmResult, client: Anthropic) -> CheckResult:
+def canon_consistency(task: Task, result: ArmResult) -> CheckResult:
     pairs = _build_items(task)
     if not pairs or not result.design.strip():
         return CheckResult(name="canon_consistency", score=0.0, notes="no canon or empty design")
@@ -50,7 +48,6 @@ def canon_consistency(task: Task, result: ArmResult, client: Anthropic) -> Check
     verdicts = classify_items(
         result.design,
         statements,
-        client=client,
         instruction=(
             "Each item below is a constraint or preference from the user's canon. "
             "Decide whether the design honors it. Be strict: 'yes' only if clearly "

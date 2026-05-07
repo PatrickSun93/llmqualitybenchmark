@@ -23,12 +23,15 @@ See [SPEC.md](./SPEC.md) for the full design and [DESIGN_NOTES.md](./DESIGN_NOTE
 
 ## Quick start
 
+All LLM calls route through `claude -p` — i.e. your **Claude Code subscription**.
+No API key needed. Quota uses per-message budget instead of per-token billing.
+
 ```bash
 # 1. Install
 pip install -e .
 
-# 2. Set API key
-export ANTHROPIC_API_KEY=sk-ant-...
+# 2. Make sure claude CLI is logged in (once)
+claude login
 
 # 3. Set up ShipFlow worktrees (only if running 'main' / 'mono' arms)
 git clone https://github.com/PatrickSun93/shipflow ~/shipflow
@@ -36,7 +39,7 @@ git -C ~/shipflow worktree add ~/shipflow-mono experiment/mono-agent
 export SHIPFLOW_MAIN_PATH=~/shipflow
 export SHIPFLOW_MONO_PATH=~/shipflow-mono
 
-# 4. Pilot (Vanilla only — no ShipFlow needed)
+# 4. Pilot (Vanilla only — cheap smoke test)
 qualitybench run --task tasks/01_habit_tracker.yaml --arms vanilla --pilot
 
 # 5. Full 3-arm pilot
@@ -44,7 +47,17 @@ qualitybench run --task tasks/01_habit_tracker.yaml --pilot
 
 # 6. Full v1 run
 qualitybench run --tasks tasks/ --runs 3
+
+# 7. Generate report (paste cost numbers from /cost into costs.example.yaml first)
+qualitybench report --cost-file costs.example.yaml
 ```
+
+### Quota notes
+
+A pilot run uses roughly 30 messages of subscription quota per task (3 arms ×
+~10 calls each between Q&A, design generation, checks, judges). Max plan caps
+out around 200 messages per 5-hour window — so 6–7 task pilots fit per window
+before reset.
 
 ## Layout
 

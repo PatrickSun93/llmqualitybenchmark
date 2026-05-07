@@ -8,7 +8,7 @@ Two primitives:
     discrete decision, each tagged committed | punt | fuzzy. Used by
     Decision density and Scope Discipline.
 
-Both run on Haiku at temperature 0 for cheap, near-deterministic outputs.
+Both go through `claude -p` (subscription auth, not API).
 """
 from __future__ import annotations
 
@@ -16,13 +16,12 @@ import json
 import re
 from dataclasses import dataclass
 
-from anthropic import Anthropic
-
+from ..llm import query_text
 from .base import EXTRACTOR_MODEL, ItemVerdict
 
 
 def _strip_json(text: str) -> str:
-    """Pull a JSON array/object out of a possibly-fenced Haiku response."""
+    """Pull a JSON array/object out of a possibly-fenced response."""
     fenced = re.search(r"```(?:json)?\s*(.+?)```", text, re.DOTALL)
     if fenced:
         return fenced.group(1).strip()
@@ -44,7 +43,6 @@ def classify_items(
     design: str,
     items: list[str],
     *,
-    client: Anthropic,
     instruction: str,
     model: str = EXTRACTOR_MODEL,
 ) -> list[ItemVerdict]:
@@ -59,19 +57,17 @@ def classify_items(
         + "\n</items>\n\n"
         "Return JSON only."
     )
-    response = client.messages.create(
-        model=model,
-        max_tokens=2048,
-        temperature=0,
-        system=CLASSIFY_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = "".join(b.text for b in response.content if b.type == "text")
+    text = query_text(prompt, system=CLASSIFY_SYSTEM, model=model)
     try:
         data = json.loads(_strip_json(text))
     except json.JSONDecodeError:
         return [
             ItemVerdict(item=it, verdict="unclear", rationale="extractor returned non-JSON")
+            for it in items
+        ]
+    if not isinstance(data, list):
+        return [
+            ItemVerdict(item=it, verdict="unclear", rationale="extractor returned non-array")
             for it in items
         ]
     out: list[ItemVerdict] = []
@@ -120,31 +116,21 @@ No prose outside the array."""
 def extract_decisions(
     design: str,
     *,
-    client: Anthropic,
     model: str = EXTRACTOR_MODEL,
     max_decisions: int = 80,
 ) -> list[Decision]:
     if not design.strip():
         return []
-    response = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        temperature=0,
-        system=EXTRACT_SYSTEM,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"<design>\n{design}\n</design>\n\n"
-                    f"List up to {max_decisions} decisions in document order. JSON only."
-                ),
-            }
-        ],
+    prompt = (
+        f"<design>\n{design}\n</design>\n\n"
+        f"List up to {max_decisions} decisions in document order. JSON only."
     )
-    text = "".join(b.text for b in response.content if b.type == "text")
+    text = query_text(prompt, system=EXTRACT_SYSTEM, model=model)
     try:
         data = json.loads(_strip_json(text))
     except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
         return []
     out: list[Decision] = []
     for entry in data:

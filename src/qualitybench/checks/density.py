@@ -6,16 +6,14 @@ get a low score even if they look long.
 """
 from __future__ import annotations
 
-from anthropic import Anthropic
-
 from ..arms.base import ArmResult
 from ..schema import Task
 from .base import CheckResult, ItemVerdict
 from .extractor import extract_decisions
 
 
-def decision_density(task: Task, result: ArmResult, client: Anthropic) -> CheckResult:
-    decisions = extract_decisions(result.design, client=client)
+def decision_density(task: Task, result: ArmResult) -> CheckResult:
+    decisions = extract_decisions(result.design)
     if not decisions:
         return CheckResult(name="decision_density", score=0.0, notes="no decisions extracted")
 

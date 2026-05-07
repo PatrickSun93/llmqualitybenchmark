@@ -4,16 +4,15 @@ Plays a real user constrained to the task's canon. Arms ask questions during
 their Q&A phase; the simulator answers based on canon facts only. Anything
 outside the canon gets a vague non-answer like a real user would give.
 
-The simulator must not be smarter than a real user — using Sonnet 4.6 (not
-Opus) and an explicit "do not infer" instruction prevents it from doing the
-arm's reasoning for it.
+The simulator must not be smarter than a real user — using Sonnet (not Opus)
+and an explicit "do not infer" instruction prevents it from doing the arm's
+reasoning for it.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from anthropic import Anthropic
-
+from .llm import query_text
 from .schema import Task
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
@@ -65,12 +64,11 @@ class QATurn:
 class UserSimulator:
     """Stateful simulator for one task.
 
-    One instance is shared across all three arms on the same task to keep the
-    answer policy consistent — fairness depends on this.
+    A fresh instance per arm keeps Q&A history isolated; sharing the *config*
+    (canon + system prompt) keeps the answer policy consistent across arms.
     """
 
     task: Task
-    client: Anthropic
     model: str = DEFAULT_MODEL
     max_turns: int = DEFAULT_MAX_TURNS
     transcript: list[QATurn] = field(default_factory=list)
@@ -93,13 +91,24 @@ class UserSimulator:
             silent_on=silent,
         )
 
-    def _build_messages(self, new_question: str) -> list[dict]:
-        messages: list[dict] = []
+    def _conversation_prompt(self, new_question: str) -> str:
+        """Render prior Q&A history + the new question as a single prompt.
+
+        `claude -p` is one-shot — there's no conversation persistence between
+        calls. We inline the history each turn so the simulator stays consistent.
+        """
+        if not self.transcript:
+            return new_question
+        history_lines: list[str] = []
         for turn in self.transcript:
-            messages.append({"role": "user", "content": turn.question})
-            messages.append({"role": "assistant", "content": turn.answer})
-        messages.append({"role": "user", "content": new_question})
-        return messages
+            history_lines.append(f"Earlier question: {turn.question}")
+            history_lines.append(f"Your earlier answer: {turn.answer}")
+        history_lines.append(f"New question: {new_question}")
+        history_lines.append(
+            "Answer the new question in 1–3 sentences. Stay consistent with your "
+            "earlier answers."
+        )
+        return "\n".join(history_lines)
 
     def answer(self, question: str) -> str:
         """Answer one question, advancing the transcript by one turn."""
@@ -110,14 +119,11 @@ class UserSimulator:
             self.transcript.append(QATurn(question=question, answer=text))
             return text
 
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=300,
+        text = query_text(
+            self._conversation_prompt(question),
             system=self._system_prompt(),
-            messages=self._build_messages(question),
-            temperature=0.3,
+            model=self.model,
         )
-        text = "".join(block.text for block in response.content if block.type == "text").strip()
         self.transcript.append(QATurn(question=question, answer=text))
         return text
 

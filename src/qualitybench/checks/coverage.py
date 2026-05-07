@@ -5,17 +5,13 @@ ask the classifier per item. Score = hit ratio.
 """
 from __future__ import annotations
 
-from anthropic import Anthropic
-
 from ..arms.base import ArmResult
 from ..schema import Task
 from .base import CheckResult
 from .extractor import classify_items
 
 
-def critical_decision_coverage(
-    task: Task, result: ArmResult, client: Anthropic
-) -> CheckResult:
+def critical_decision_coverage(task: Task, result: ArmResult) -> CheckResult:
     items = task.must_be_addressed
     if not items or not result.design.strip():
         return CheckResult(name="critical_decision_coverage", score=0.0, notes="empty inputs")
@@ -27,14 +23,12 @@ def critical_decision_coverage(
     verdicts = classify_items(
         result.design,
         statements,
-        client=client,
         instruction=(
             "Each item is a critical decision the design must make a committed "
             "choice about. Mark 'yes' only if the design picks a specific approach; "
             "'no' if the question is not addressed; 'unclear' if mentioned but vague."
         ),
     )
-    # Map back to the original item phrasing for readability.
     for v, item in zip(verdicts, items, strict=False):
         v.item = item
 
@@ -46,7 +40,7 @@ def critical_decision_coverage(
     )
 
 
-def question_coverage(task: Task, result: ArmResult, client: Anthropic) -> CheckResult:
+def question_coverage(task: Task, result: ArmResult) -> CheckResult:
     """Of the task's key_ambiguities, how many did the arm raise as a question?"""
     items = task.key_ambiguities
     if not items:
@@ -68,7 +62,6 @@ def question_coverage(task: Task, result: ArmResult, client: Anthropic) -> Check
     verdicts = classify_items(
         f"<asked>\n{asked}\n</asked>",
         statements,
-        client=client,
         instruction=(
             "Each item is an ambiguity the arm should ideally have asked about. "
             "Mark 'yes' if any of the asked questions targets it; 'no' otherwise."

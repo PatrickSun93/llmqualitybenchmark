@@ -14,8 +14,6 @@ over-engineer by adding "best practices" the user never asked for.
 """
 from __future__ import annotations
 
-from anthropic import Anthropic
-
 from ..arms.base import ArmResult
 from ..schema import Task
 from .base import CheckResult, ItemVerdict
@@ -37,8 +35,8 @@ def _build_anchors(task: Task, result: ArmResult) -> str:
     )
 
 
-def scope_discipline(task: Task, result: ArmResult, client: Anthropic) -> CheckResult:
-    decisions = extract_decisions(result.design, client=client)
+def scope_discipline(task: Task, result: ArmResult) -> CheckResult:
+    decisions = extract_decisions(result.design)
     if not decisions:
         return CheckResult(name="scope_discipline", score=0.0, notes="no decisions extracted")
 
@@ -53,7 +51,6 @@ def scope_discipline(task: Task, result: ArmResult, client: Anthropic) -> CheckR
     verdicts = classify_items(
         anchors,
         statements,
-        client=client,
         instruction=(
             "Decide whether each decision is anchored in the user's stated inputs "
             "(idea / canon / must_be_addressed / Q&A). 'yes' if anchored. 'no' if it "

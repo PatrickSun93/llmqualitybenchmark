@@ -1,10 +1,14 @@
-"""Entry point for the qualitybench CLI."""
+"""Entry point for the qualitybench CLI.
+
+All LLM calls go through `claude -p` (claude-agent-sdk) — i.e. the user's
+Claude Code subscription. No ANTHROPIC_API_KEY required at the harness level
+(though the user must be logged in to claude CLI: `claude login`).
+"""
 from __future__ import annotations
 
 from pathlib import Path
 
 import click
-from anthropic import Anthropic
 from rich.console import Console
 
 from .arms.base import ArmAdapter
@@ -19,14 +23,13 @@ console = Console()
 
 def _build_arms(
     names: list[str],
-    client: Anthropic,
     shipflow_main_path: Path | None,
     shipflow_mono_path: Path | None,
 ) -> list[ArmAdapter]:
     arms: list[ArmAdapter] = []
     for name in names:
         if name == "vanilla":
-            arms.append(VanillaArm(client=client))
+            arms.append(VanillaArm())
         elif name == "main":
             if not shipflow_main_path:
                 raise click.UsageError(
@@ -119,10 +122,8 @@ def run(
         f"runs={runs} pilot={pilot}"
     )
 
-    client = Anthropic()
     adapters = _build_arms(
         arm_names,
-        client,
         shipflow_main_path=shipflow_main_path,
         shipflow_mono_path=shipflow_mono_path,
     )
@@ -137,16 +138,15 @@ def run(
                 f"[cyan]→[/cyan] task={task.id} run={run_idx}/{runs} "
                 f"arms={[a.name for a in adapters]}"
             )
-            runs = run_task(
+            arm_runs = run_task(
                 task=task,
                 arms=adapters,
-                client=client,
                 out_dir=out_dir,
                 run_index=run_idx,
                 max_turns=max_turns,
                 pilot=pilot,
             )
-            for r in runs:
+            for r in arm_runs:
                 tag = "[red]ERR[/red]" if r.arm_result.error else "[green]OK[/green]"
                 scores = " ".join(
                     f"{c.name}={c.score:.2f}" for c in r.checks
