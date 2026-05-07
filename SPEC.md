@@ -355,6 +355,61 @@ Pilot 通过后,扩到 5 task / 3 run / 9 维度。再通过后,扩到 15-20 tas
 - Phase 边界自动检测(替代 manual phase marker)
 - Human eval 校准 LLM judge
 - Web dashboard
+- **泛化到 ShipFlow 之外的 skill(见 §14.1)**
+
+### 14.1 泛化到其他 Skill / Plugin(TODO)
+
+当前 harness 在 invocation 层、路径层、rubric 层都对 ShipFlow 的 design-generation 模式做了硬编码。要扩展到 sf-grill / grillme 等其他 skill,**不是简单抽路径**,因为那些 skill 是另一类技能(critique / interrogation / refactor / synthesis...),评估的核心问题完全不同。
+
+需要分三层抽象:
+
+**Layer 1 — Skill type 分类**
+
+`tasks/<id>.yaml` 加顶级字段 `skill_type:`,至少识别:
+
+| skill_type | 例子 | 评估核心问题 |
+|---|---|---|
+| `design-generation` | sf-discover + sf-brief | 「design 是否良构?」(当前 9 维度) |
+| `critique` | sf-grill | 「找到的 issue 是否真实、specific、actionable?」 |
+| `interrogation` | grillme(?)等 | 「问的问题是否锋利、覆盖关键?」 |
+| `refactor` | 重构类 | 「改动是否保持语义、改进可读?」 |
+| `synthesis` | 多输入合一 | 「输入元素是否被忠实整合?」 |
+
+**Layer 2 — Plugin profile YAML**
+
+把 `arms/shipflow.py` 里写死的 slash command + 文件路径抽到 `plugins/<name>.yaml`:
+
+```yaml
+# plugins/shipflow.yaml
+name: shipflow
+skill_type: design-generation
+flow:
+  - send: '/sf-discover "{{idea}}"'
+  - read_questions: docs/shipflow/discovery/*/questions.md
+  - send_answers: bundled_user_message
+  - send: /sf-brief
+  - read_design: docs/shipflow/briefs/BRIEF-*.md
+example_dir_layout:
+  questions: docs/shipflow/discovery/*/questions.md
+  answers: docs/shipflow/discovery/*/answers.md
+  design: docs/shipflow/briefs/BRIEF-*.md
+```
+
+新 plugin = 加新 YAML,**不动 Python**。
+
+**Layer 3 — 按 skill_type 切换 rubric**
+
+不同 skill_type 用不同 check + judge 集合。`critique` 类需要全新 rubric(issue specificity / persona fidelity / actionable ratio / read-only compliance / false positive rate 等),与 design rubric 共享维度有限。
+
+**推进路径**:
+
+1. Refactor:把 ShipFlow 路径抽成 `plugins/shipflow.yaml` + `plugins/shipflow-mono.yaml`(中等工作量)
+2. 加 `skill_type` 字段(小)
+3. 设计 critique 类 rubric — **需要专门讨论**,不是直接 port
+4. 加 `plugins/sf-grill.yaml`,跑通验证
+5. 同样思路扩到 grillme / 其他 skill
+
+**当前阶段决定**:暂不动,集中精力先验证 ShipFlow main vs mono 的核心实验问题。这个 TODO 等核心结论稳定后再启动。
 
 ---
 
