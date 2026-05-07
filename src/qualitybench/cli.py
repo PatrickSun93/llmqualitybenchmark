@@ -4,9 +4,27 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+from anthropic import Anthropic
 from rich.console import Console
 
+from .arms.base import ArmAdapter
+from .arms.vanilla import VanillaArm
+from .runner import run_task
+from .schema import load_tasks
+
 console = Console()
+
+
+def _build_arms(names: list[str], client: Anthropic) -> list[ArmAdapter]:
+    arms: list[ArmAdapter] = []
+    for name in names:
+        if name == "vanilla":
+            arms.append(VanillaArm(client=client))
+        elif name in ("main", "mono"):
+            console.print(f"[yellow]arm '{name}' not yet implemented (commit 5)[/yellow]")
+        else:
+            raise click.UsageError(f"unknown arm: {name}")
+    return arms
 
 
 @click.group()
@@ -42,6 +60,7 @@ def main() -> None:
     type=click.Path(path_type=Path),
     show_default=True,
 )
+@click.option("--max-turns", default=5, show_default=True, help="Q&A turn cap per arm.")
 def run(
     task_path: Path | None,
     tasks_dir: Path | None,
@@ -49,14 +68,51 @@ def run(
     pilot: bool,
     arms: str,
     out_dir: Path,
+    max_turns: int,
 ) -> None:
     """Run the benchmark."""
     if not task_path and not tasks_dir:
         raise click.UsageError("Provide either --task or --tasks.")
 
     arm_names = [a.strip() for a in arms.split(",") if a.strip()]
-    console.print(f"[bold]qualitybench[/bold] arms={arm_names} runs={runs} pilot={pilot}")
-    console.print("[yellow]runner not yet wired — coming in commit 4[/yellow]")
+    if pilot:
+        runs = 1
+
+    source = task_path or tasks_dir
+    assert source is not None
+    tasks = load_tasks(source)
+    console.print(
+        f"[bold]qualitybench[/bold] tasks={len(tasks)} arms={arm_names} "
+        f"runs={runs} pilot={pilot}"
+    )
+
+    client = Anthropic()
+    adapters = _build_arms(arm_names, client)
+    if not adapters:
+        console.print("[red]no runnable arms; exiting[/red]")
+        return
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for task in tasks:
+        for run_idx in range(1, runs + 1):
+            console.print(
+                f"[cyan]→[/cyan] task={task.id} run={run_idx}/{runs} "
+                f"arms={[a.name for a in adapters]}"
+            )
+            results = run_task(
+                task=task,
+                arms=adapters,
+                client=client,
+                out_dir=out_dir,
+                run_index=run_idx,
+                max_turns=max_turns,
+            )
+            for r in results:
+                tag = "[red]ERR[/red]" if r.error else "[green]OK[/green]"
+                console.print(
+                    f"  {tag} {r.arm_name}: {len(r.qa_turns)} Q&A turns, "
+                    f"{len(r.design)} design chars"
+                )
 
 
 if __name__ == "__main__":
