@@ -10,6 +10,12 @@ from anthropic import Anthropic
 
 from .arms.base import ArmAdapter, ArmResult
 from .checks import CheckResult, run_all_checks, run_pilot_checks
+from .judge import (
+    DIMENSION_DEFINITIONS,
+    internal_consistency,
+    pairwise_tournament,
+    question_quality,
+)
 from .schema import Task
 from .simulator import UserSimulator
 
@@ -38,6 +44,9 @@ def run_arm(task: Task, arm: ArmAdapter, client: Anthropic, max_turns: int = 5) 
     return arm.run(task=task, simulator=simulator)
 
 
+PAIRWISE_DIMENSIONS = list(DIMENSION_DEFINITIONS.keys())
+
+
 def run_task(
     task: Task,
     arms: list[ArmAdapter],
@@ -48,7 +57,7 @@ def run_task(
     pilot: bool = False,
     skip_checks: bool = False,
 ) -> list[ArmRun]:
-    """Run every arm on a task, score with deterministic checks, persist artifacts."""
+    """Run every arm on a task, score with checks, run pairwise tournament, persist."""
     runs: list[ArmRun] = []
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = out_dir / task.id / f"run_{run_index:02d}_{timestamp}"
@@ -59,11 +68,28 @@ def run_task(
         checks: list[CheckResult] = []
         if not skip_checks and not arm_result.error and arm_result.design.strip():
             check_fn = run_pilot_checks if pilot else run_all_checks
-            checks = check_fn(task, arm_result, client)
+            checks = list(check_fn(task, arm_result, client))
+            if not pilot:
+                # Judge-based per-arm checks
+                checks.append(internal_consistency(task, arm_result, client))
+                checks.append(question_quality(task, arm_result, client, max_turns=max_turns))
         run = ArmRun(arm_result=arm_result, checks=checks)
         runs.append(run)
         path = run_dir / f"{arm.name}.json"
         path.write_text(json.dumps(run.to_dict(), indent=2, ensure_ascii=False))
+
+    # Pairwise tournament across arms (skip in pilot mode and when fewer than 2 arms succeeded).
+    pairwise: dict[str, dict[str, int]] = {}
+    successful = {
+        r.arm_result.arm_name: r.arm_result
+        for r in runs
+        if not r.arm_result.error and r.arm_result.design.strip()
+    }
+    if not pilot and len(successful) >= 2:
+        for dim in PAIRWISE_DIMENSIONS:
+            pairwise[dim] = pairwise_tournament(
+                dimension=dim, task=task, arm_results=successful, client=client
+            )
 
     summary = {
         "task_id": task.id,
@@ -81,6 +107,7 @@ def run_task(
             }
             for r in runs
         ],
+        "pairwise_ranks": pairwise,
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     return runs
