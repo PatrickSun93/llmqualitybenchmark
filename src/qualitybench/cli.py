@@ -136,19 +136,24 @@ def run(
                 f"[cyan]→[/cyan] task={task.id} run={run_idx}/{runs} "
                 f"arms={[a.name for a in adapters]}"
             )
-            results = run_task(
+            runs = run_task(
                 task=task,
                 arms=adapters,
                 client=client,
                 out_dir=out_dir,
                 run_index=run_idx,
                 max_turns=max_turns,
+                pilot=pilot,
             )
-            for r in results:
-                tag = "[red]ERR[/red]" if r.error else "[green]OK[/green]"
+            for r in runs:
+                tag = "[red]ERR[/red]" if r.arm_result.error else "[green]OK[/green]"
+                scores = " ".join(
+                    f"{c.name}={c.score:.2f}" for c in r.checks
+                ) or "(no checks)"
                 console.print(
-                    f"  {tag} {r.arm_name}: {len(r.qa_turns)} Q&A turns, "
-                    f"{len(r.design)} design chars"
+                    f"  {tag} {r.arm_result.arm_name}: "
+                    f"{len(r.arm_result.qa_turns)} Q&A, "
+                    f"{len(r.arm_result.design)} design chars | {scores}"
                 )
 
 
