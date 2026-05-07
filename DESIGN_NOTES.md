@@ -235,7 +235,36 @@
 - 转换框架(从「绝对评分」到「procedural」)时,**容易丢掉一些原本想测的东西**,而且因为新框架自洽,丢失感不强烈。需要回头核对原始需求清单。
 - 维度之间的「互补性」很重要 — Trace-ability 看「该有的有依据」,Scope Discipline 看「不该有的没混进来」,两者必须配对,只有一个不完整。
 
-### 2.10 成本数据:用真实账单,不要估
+### 2.10 公平性:Vanilla 在 Q&A-Mediated 维度上的结构性歧视
+
+**问题(用户实测时发现)**:跑出第一份报告会注意到,Vanilla 在 Canon 一致性、Critical decision coverage、Question Quality 这几个维度上得分远低于 ShipFlow。**初看像是 plugin 大胜,但其实是 rubric 设计的副作用**:
+
+- Vanilla 不会主动问问题(没有 phase-gated workflow 推它)
+- 不问就不知道 canon 约束(讨厌游戏化、预算上限...)
+- 不知道约束 → Canon 一致性低
+- 没 Q&A → Question Quality coverage = 0
+
+**这是循环论证**:rubric 把「会做 Q&A」编码成「质量好」,然后比较「会做 Q&A 的 plugin」和「不会做 Q&A 的 baseline」,得出「plugin 质量更好」的结论。这是 tautology,不是 finding。
+
+**修复 — 三层叠加**:
+
+1. **加第 4 个 arm `vanilla-with-canon`** 作为公平基线 — 把 canon 直接注入 user message,模拟「假如 Vanilla 有完美 Q&A 能力」。这把「Q&A 这件事本身值多少」从「多 agent 编排值多少」分离开。
+
+2. **报告分组** — 维度分成 Intrinsic(全员公平)和 Q&A-Mediated(用 vanilla-with-canon 做 baseline 而非 vanilla)。**不合并总分**,免得把两类质量混淆。
+
+3. **N/A 语义** — 不适用于某 arm 的维度(如 Question Quality 给没 Q&A 的 arm)返回 `None`,从聚合和排名中排除,不悄悄打 0 分。
+
+**修复后的结论格式更诚实**:
+- `vanilla → vanilla-with-canon` 的 lift = Q&A 这件事的价值,与 plugin 选择无关
+- `vanilla-with-canon → main` 的 lift = **多 agent 编排在同等 context 下的真实价值**(这才是你想测的)
+- `main vs mono` = specialized vs role-as-content 的纯架构差异
+
+**学到的元教训**:
+- **「baseline 在所有维度上都该公平」是错的认识**。有些维度的设计会intrinsic 地依赖某 arm 的能力。这种维度不该用全局 baseline,而该有该维度自己的公平基线。
+- **N/A 不是 0**。把「没做这事」编码成「做得差」是常见的 silent bias,需要显式处理。
+- **Tautology 是 benchmark 设计最隐蔽的 failure mode**。当 rubric 跟其中一个 arm 的设计哲学高度一致时,要警惕「这是发现还是循环论证」。
+
+### 2.11 成本数据:用真实账单,不要估
 
 **问题**:每个 task 多少 token / 多少钱?
 

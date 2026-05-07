@@ -40,12 +40,20 @@ def run_pilot_checks(task: Task, result: ArmResult) -> list[CheckResult]:
     ]
 
 
-def run_all_checks(task: Task, result: ArmResult) -> list[CheckResult]:
-    """All deterministic checks (5 of the 9 dimensions). Judge-based ones live in judge.py."""
+def run_all_deterministic_checks(task: Task, result: ArmResult) -> list[CheckResult]:
+    """All deterministic dimensions (4). Judge-based ones live in judge.py.
+
+    Note: `question_coverage` is omitted here because the composite
+    `judge.question_quality` already runs it internally — running both would
+    duplicate the call.
+    """
     return [
         canon_consistency(task, result),
         critical_decision_coverage(task, result),
         decision_density(task, result),
         scope_discipline(task, result),
-        question_coverage(task, result),
     ]
+
+
+# Backwards-compatible alias; kept for callers that imported the old name.
+run_all_checks = run_all_deterministic_checks

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .arms.base import ArmAdapter, ArmResult
-from .checks import CheckResult, run_all_checks, run_pilot_checks
+from .checks import CheckResult, run_all_deterministic_checks, run_pilot_checks
 from .judge import (
     DIMENSION_DEFINITIONS,
     internal_consistency,
@@ -69,7 +69,7 @@ def run_task(
         arm_result = run_arm(task=task, arm=arm, max_turns=max_turns)
         checks: list[CheckResult] = []
         if not skip_checks and not arm_result.error and arm_result.design.strip():
-            check_fn = run_pilot_checks if pilot else run_all_checks
+            check_fn = run_pilot_checks if pilot else run_all_deterministic_checks
             checks = list(check_fn(task, arm_result))
             if not pilot:
                 checks.append(internal_consistency(task, arm_result))
@@ -80,16 +80,22 @@ def run_task(
         path.write_text(json.dumps(run.to_dict(), indent=2, ensure_ascii=False))
 
     pairwise: dict[str, dict[str, int]] = {}
-    successful = {
-        r.arm_result.arm_name: r.arm_result
-        for r in runs
-        if not r.arm_result.error and r.arm_result.design.strip()
-    }
-    if not pilot and len(successful) >= 2:
+    if not pilot:
         for dim in PAIRWISE_DIMENSIONS:
-            pairwise[dim] = pairwise_tournament(
-                dimension=dim, task=task, arm_results=successful
-            )
+            # Only rank arms whose individual check on this dim is not N/A.
+            # E.g. question_quality is only ranked among arms that did Q&A.
+            eligible: dict[str, ArmResult] = {}
+            for r in runs:
+                if r.arm_result.error or not r.arm_result.design.strip():
+                    continue
+                score = next((c.score for c in r.checks if c.name == dim), None)
+                if score is None:
+                    continue
+                eligible[r.arm_result.arm_name] = r.arm_result
+            if len(eligible) >= 2:
+                pairwise[dim] = pairwise_tournament(
+                    dimension=dim, task=task, arm_results=eligible
+                )
 
     summary = {
         "task_id": task.id,
@@ -103,7 +109,10 @@ def run_task(
                 "qa_turns": len(r.arm_result.qa_turns),
                 "design_chars": len(r.arm_result.design),
                 "error": r.arm_result.error,
-                "scores": {c.name: round(c.score, 3) for c in r.checks},
+                "scores": {
+                    c.name: (None if c.score is None else round(c.score, 3))
+                    for c in r.checks
+                },
             }
             for r in runs
         ],

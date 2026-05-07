@@ -1,4 +1,4 @@
-# LLM Quality Benchmark — Spec v0.2
+# LLM Quality Benchmark — Spec v0.3
 
 > 一个用于评估 Claude Code phase-gated 多 agent 工作流 plugin 质量的 benchmark harness。
 > 测的是 **plugin 相对 baseline 的增量(lift)**,以 **程序性质量(well-formedness)** 为主要测度,而非「设计好坏」这种主观判断。
@@ -33,19 +33,36 @@
 
 ---
 
-## 4. 三个 Arm
+## 4. 四个 Arm
 
 | Arm | 描述 | 调用方式 |
 |---|---|---|
-| **Vanilla** | 裸 Claude Code,不加任何引导 prompt | `claude -p "<idea 原文>"` (唯一允许的补偿:"请只输出 design 文档,不要写代码") |
+| **Vanilla** | 裸 Claude,只挂一个 `ask_user` MCP tool。**不加引导 prompt 让它去问** — 它自己决定问不问。 | claude-agent-sdk + 仅 ask_user 工具 |
+| **Vanilla-with-canon** | 裸 Claude,但 canon 直接注入 user message(模拟「假如有完美 Q&A 能力」)。**不调用 simulator** — 已经有所有信息,问就是耍赖。 | `claude -p` + canon-injected prompt |
 | **ShipFlow Main** | 22 个 specialized agent(tech-lead / product-lead / build-lead 等),每个 role 在 system prompt 里 | ShipFlow `main` 分支,通过 Claude Agent SDK 触发 |
 | **ShipFlow Mono** | 1 个 generic `shipflow-mono` agent,被 spawn 时读取 `agents/<role>.md` 来扮演角色 — role 作为 user content,不在 system prompt | ShipFlow `experiment/mono-agent` 分支,通过 Claude Agent SDK 触发 |
+
+**为什么 4 个 arm**:Vanilla-with-canon 是 **公平基线**。它把「Q&A 这件事本身的价值」从「多 agent 编排的价值」中分离出来:
+
+- `vanilla → vanilla-with-canon` 的 lift = **Q&A 作为能力的价值**(plugin-agnostic)
+- `vanilla-with-canon → ShipFlow Main` 的 lift = **多 agent 编排在同等 context 下的价值**(这才是真正的实验问题)
+- `ShipFlow Main → ShipFlow Mono` = **specialized vs role-as-content 纯架构差异**
+
+不加 vanilla-with-canon 的话,Vanilla 在 Canon 一致性等维度上天然吃亏(它没问就不知道约束),会污染主结论。
 
 **关键**:Main 和 Mono 在 phase 编排、role 定义文件上是相同的。**唯一变量是 role 注入位置**(system prompt vs user content)。这是受控实验。
 
 ---
 
-## 5. 评估维度(9 个)
+## 5. 评估维度(9 个,分两组)
+
+为防止 Vanilla 在结构上被歧视,9 个维度分成两组,**报告中分别呈现,不合并总分**:
+
+- **Intrinsic(主轴,与 Q&A 无关)**:`decision_density` / `internal_consistency` / `scope_discipline`。所有 arm 公平竞争,baseline 是 `vanilla`。
+- **Q&A-Mediated(取决于是否做 Q&A)**:`canon_consistency` / `critical_decision_coverage` / `question_coverage` / `question_quality`。Baseline 是 `vanilla-with-canon`(公平上限)。Bare `vanilla` 在这组的低分**反映的是没做 Q&A 这件事**,不是设计能力差。
+- **Mode-specific(留 v2)**:Role bleed / Specialization silos。
+
+**N/A 语义**:对该 arm 不适用的维度(如 question_quality 之于无 Q&A 的 arm)返回 `score=None`,**不参与该维度的聚合和排名**,不是悄悄打 0 分。
 
 ### 5.1 程序性指标 — 主轴
 
@@ -355,7 +372,7 @@ Pilot 通过后,扩到 5 task / 3 run / 9 维度。再通过后,扩到 15-20 tas
 
 | 决策 | 选择 | 关键考量 |
 |---|---|---|
-| 是否要 baseline 对照 | 是,3-arm | 没有 baseline 没法识别 plugin 真实 lift |
+| 是否要 baseline 对照 | 是,4-arm(含公平基线 vanilla-with-canon) | 没有 baseline 没法识别 plugin 真实 lift;只有一个 vanilla baseline 会让 Q&A-mediated 维度对裸 vanilla 不公平 |
 | 范围到哪 | 停在 design phase | 用户实际比较场景就在这里;且避开 code 测试的额外复杂度 |
 | 是否约束输出格式 | 不约束 | 真实使用场景就有差异,在 judge 反偏见条款里压制 |
 | 是否假定 ground truth | 否,转 procedural | 开放任务没有唯一答案,假装有反而引入偏见 |

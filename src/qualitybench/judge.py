@@ -207,14 +207,26 @@ def _non_redundancy_score(result: ArmResult) -> float:
 
 
 def question_quality(task: Task, result: ArmResult, max_turns: int = 5) -> CheckResult:
-    """Composite of coverage + precision + restraint + non-redundancy."""
-    coverage = question_coverage(task, result)
+    """Composite of coverage + precision + restraint + non-redundancy.
+
+    Returns N/A (score=None) when the arm did not perform Q&A — penalizing an
+    arm for not doing something it has no facility for is structural bias
+    against Vanilla. The `vanilla-with-canon` arm sidesteps this by being
+    given the canon directly.
+    """
     if not result.qa_turns:
-        score = (coverage.score + 1.0 + 1.0 + 1.0) / 4
         return CheckResult(
             name="question_quality",
-            score=score,
-            notes="arm asked no questions",
+            score=None,
+            notes="n/a — arm performed no Q&A",
+        )
+
+    coverage = question_coverage(task, result)
+    if coverage.is_na:
+        return CheckResult(
+            name="question_quality",
+            score=None,
+            notes="n/a — task has no key_ambiguities",
         )
 
     questions = [t.question for t in result.qa_turns]

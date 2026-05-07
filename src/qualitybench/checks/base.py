@@ -27,12 +27,21 @@ class ItemVerdict:
 
 @dataclass
 class CheckResult:
-    """Output of one check on one ArmResult."""
+    """Output of one check on one ArmResult.
+
+    `score` is None when the check is not applicable for this arm (e.g.
+    Question Quality on an arm that did not perform Q&A). N/A scores are
+    excluded from aggregation and rankings — they are not silent zeros.
+    """
 
     name: str
-    score: float  # 0.0..1.0; higher is better
+    score: float | None  # 0.0..1.0; None = not applicable
     items: list[ItemVerdict] = field(default_factory=list)
     notes: str = ""
+
+    @property
+    def is_na(self) -> bool:
+        return self.score is None
 
     def as_dict(self) -> dict:
         return {

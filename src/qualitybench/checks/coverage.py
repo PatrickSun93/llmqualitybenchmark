@@ -41,17 +41,24 @@ def critical_decision_coverage(task: Task, result: ArmResult) -> CheckResult:
 
 
 def question_coverage(task: Task, result: ArmResult) -> CheckResult:
-    """Of the task's key_ambiguities, how many did the arm raise as a question?"""
+    """Of the task's key_ambiguities, how many did the arm raise as a question?
+
+    N/A when the arm performed no Q&A — measuring "ambiguity coverage via
+    questions" against an arm with no Q&A facility is the structural bias
+    we're trying to eliminate. (Compare arms on Canon consistency instead;
+    that's the dimension that captures whether the right info was elicited.)
+    """
     items = task.key_ambiguities
     if not items:
-        return CheckResult(name="question_coverage", score=0.0, notes="no key_ambiguities")
+        return CheckResult(
+            name="question_coverage", score=None, notes="n/a — no key_ambiguities"
+        )
     if not result.qa_turns:
-        # Arm asked nothing — coverage is 0 by definition.
         return CheckResult(
             name="question_coverage",
-            score=0.0,
+            score=None,
             items=[],
-            notes="arm asked no questions",
+            notes="n/a — arm performed no Q&A",
         )
 
     asked = "\n".join(f"- {t.question}" for t in result.qa_turns)

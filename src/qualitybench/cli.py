@@ -14,6 +14,7 @@ from rich.console import Console
 from .arms.base import ArmAdapter
 from .arms.shipflow import ShipFlowArm
 from .arms.vanilla import VanillaArm
+from .arms.vanilla_with_canon import VanillaWithCanonArm
 from .report import build_report
 from .runner import run_task
 from .schema import load_tasks
@@ -30,6 +31,8 @@ def _build_arms(
     for name in names:
         if name == "vanilla":
             arms.append(VanillaArm())
+        elif name == "vanilla-with-canon":
+            arms.append(VanillaWithCanonArm())
         elif name == "main":
             if not shipflow_main_path:
                 raise click.UsageError(
@@ -69,9 +72,13 @@ def main() -> None:
 @click.option("--pilot", is_flag=True, help="Pilot mode: 1 run, 4 core dimensions only.")
 @click.option(
     "--arms",
-    default="vanilla,main,mono",
+    default="vanilla,vanilla-with-canon,main,mono",
     show_default=True,
-    help="Comma-separated arm names to run.",
+    help=(
+        "Comma-separated arm names. `vanilla-with-canon` is the fairness "
+        "baseline (Vanilla + canon injected) — keep it in to neutralize bias "
+        "against bare Claude on Q&A-mediated dimensions."
+    ),
 )
 @click.option(
     "--out",
@@ -149,7 +156,8 @@ def run(
             for r in arm_runs:
                 tag = "[red]ERR[/red]" if r.arm_result.error else "[green]OK[/green]"
                 scores = " ".join(
-                    f"{c.name}={c.score:.2f}" for c in r.checks
+                    f"{c.name}={'n/a' if c.score is None else f'{c.score:.2f}'}"
+                    for c in r.checks
                 ) or "(no checks)"
                 console.print(
                     f"  {tag} {r.arm_result.arm_name}: "
