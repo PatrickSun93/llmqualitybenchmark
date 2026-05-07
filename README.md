@@ -24,16 +24,25 @@ See [SPEC.md](./SPEC.md) for the full design and [DESIGN_NOTES.md](./DESIGN_NOTE
 ## Quick start
 
 ```bash
-# Install
+# 1. Install
 pip install -e .
 
-# Set API key
+# 2. Set API key
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# Run pilot (1 task, 3 arms, 1 run)
+# 3. Set up ShipFlow worktrees (only if running 'main' / 'mono' arms)
+git clone https://github.com/PatrickSun93/shipflow ~/shipflow
+git -C ~/shipflow worktree add ~/shipflow-mono experiment/mono-agent
+export SHIPFLOW_MAIN_PATH=~/shipflow
+export SHIPFLOW_MONO_PATH=~/shipflow-mono
+
+# 4. Pilot (Vanilla only — no ShipFlow needed)
+qualitybench run --task tasks/01_habit_tracker.yaml --arms vanilla --pilot
+
+# 5. Full 3-arm pilot
 qualitybench run --task tasks/01_habit_tracker.yaml --pilot
 
-# Full v1 run
+# 6. Full v1 run
 qualitybench run --tasks tasks/ --runs 3
 ```
 

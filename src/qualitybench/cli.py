@@ -8,6 +8,7 @@ from anthropic import Anthropic
 from rich.console import Console
 
 from .arms.base import ArmAdapter
+from .arms.shipflow import ShipFlowArm
 from .arms.vanilla import VanillaArm
 from .runner import run_task
 from .schema import load_tasks
@@ -15,13 +16,28 @@ from .schema import load_tasks
 console = Console()
 
 
-def _build_arms(names: list[str], client: Anthropic) -> list[ArmAdapter]:
+def _build_arms(
+    names: list[str],
+    client: Anthropic,
+    shipflow_main_path: Path | None,
+    shipflow_mono_path: Path | None,
+) -> list[ArmAdapter]:
     arms: list[ArmAdapter] = []
     for name in names:
         if name == "vanilla":
             arms.append(VanillaArm(client=client))
-        elif name in ("main", "mono"):
-            console.print(f"[yellow]arm '{name}' not yet implemented (commit 5)[/yellow]")
+        elif name == "main":
+            if not shipflow_main_path:
+                raise click.UsageError(
+                    "--shipflow-main-path is required for arm 'main'"
+                )
+            arms.append(ShipFlowArm(name="main", plugin_path=shipflow_main_path))
+        elif name == "mono":
+            if not shipflow_mono_path:
+                raise click.UsageError(
+                    "--shipflow-mono-path is required for arm 'mono'"
+                )
+            arms.append(ShipFlowArm(name="mono", plugin_path=shipflow_mono_path))
         else:
             raise click.UsageError(f"unknown arm: {name}")
     return arms
@@ -61,6 +77,20 @@ def main() -> None:
     show_default=True,
 )
 @click.option("--max-turns", default=5, show_default=True, help="Q&A turn cap per arm.")
+@click.option(
+    "--shipflow-main-path",
+    "shipflow_main_path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    envvar="SHIPFLOW_MAIN_PATH",
+    help="Path to ShipFlow main-branch checkout (contains .claude-plugin/).",
+)
+@click.option(
+    "--shipflow-mono-path",
+    "shipflow_mono_path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    envvar="SHIPFLOW_MONO_PATH",
+    help="Path to ShipFlow experiment/mono-agent checkout.",
+)
 def run(
     task_path: Path | None,
     tasks_dir: Path | None,
@@ -69,6 +99,8 @@ def run(
     arms: str,
     out_dir: Path,
     max_turns: int,
+    shipflow_main_path: Path | None,
+    shipflow_mono_path: Path | None,
 ) -> None:
     """Run the benchmark."""
     if not task_path and not tasks_dir:
@@ -87,7 +119,12 @@ def run(
     )
 
     client = Anthropic()
-    adapters = _build_arms(arm_names, client)
+    adapters = _build_arms(
+        arm_names,
+        client,
+        shipflow_main_path=shipflow_main_path,
+        shipflow_mono_path=shipflow_mono_path,
+    )
     if not adapters:
         console.print("[red]no runnable arms; exiting[/red]")
         return
